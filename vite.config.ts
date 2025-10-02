@@ -1,60 +1,88 @@
-import { defineConfig } from "vite";
-import react from "@vitejs/plugin-react-swc";
-import path from "path";
-import vitePluginSpaFallback from "./vite-spa-fallback";
+import { defineConfig } from 'vite';
+import react from '@vitejs/plugin-react-swc';
+import { resolve } from 'path';
+import { fileURLToPath } from 'url';
 
 // https://vitejs.dev/config/
 export default defineConfig({
   server: {
-    host: "::",
+    host: '::',
     port: 8080,
-    // Habilita o suporte a SPA (Single Page Application)
+    strictPort: true,
+    open: '/',
     fs: {
       strict: false
     },
     hmr: {
       overlay: false
     },
-    // Configurações adicionais para o servidor de desenvolvimento
-    open: true,
-    cors: true
+    proxy: {
+      '/api': {
+        target: 'http://localhost:8080',
+        changeOrigin: true,
+        secure: false
+      }
+    }
   },
   plugins: [
-    react(),
-    vitePluginSpaFallback()
+    react()
   ],
   resolve: {
     alias: {
-      "@": path.resolve(__dirname, "./src"),
-    },
+      '@': resolve(__dirname, 'src')
+    }
   },
-  // Configuração para garantir que as rotas funcionem corretamente no build de produção
   build: {
     outDir: 'dist',
     assetsDir: 'assets',
     emptyOutDir: true,
+    sourcemap: true,
     rollupOptions: {
       output: {
-        manualChunks: undefined,
         entryFileNames: 'assets/[name]-[hash].js',
         chunkFileNames: 'assets/[name]-[hash].js',
         assetFileNames: 'assets/[name]-[hash][extname]'
       }
+    },
+    minify: 'terser',
+    terserOptions: {
+      compress: {
+        drop_console: false,
+        drop_debugger: true
+      }
     }
   },
-  // Configuração base para URLs
   base: '/',
-  // Define variáveis de ambiente
   define: {
     'process.env.NODE_ENV': '"development"',
+    'process.env.BASE_URL': JSON.stringify('/')
   },
-  // Configuração para o servidor de visualização
   preview: {
     port: 8080,
     strictPort: true,
-    // Habilita o fallback SPA no servidor de visualização
-    open: true
+    open: '/',
+    proxy: {
+      '/api': {
+        target: 'http://localhost:8080',
+        changeOrigin: true,
+        secure: false
+      }
+    }
   },
-  // Habilita o modo SPA
   appType: 'spa',
+  optimizeDeps: {
+    include: ['react', 'react-dom', 'react-router-dom', 'framer-motion'],
+    esbuildOptions: {
+      target: 'es2020',
+      supported: {
+        'top-level-await': true
+      }
+    }
+  },
+  ssr: {
+    noExternal: ['@radix-ui/*']
+  },
+  worker: {
+    format: 'es'
+  }
 });
