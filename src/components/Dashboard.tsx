@@ -9,6 +9,13 @@ import { getAppointments } from "@/utils/localStorage";
 import { Search, Calendar, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 
+// Extend the Appointment type to include any additional properties used in the component
+type ExtendedAppointment = Appointment & {
+  clientName?: string;
+  carModel?: string;
+  plate?: string;
+};
+
 interface DashboardProps {
   refreshTrigger: number;
   onAppointmentUpdated?: () => void;
@@ -141,18 +148,27 @@ const AppointmentsList = ({
 const Dashboard = ({ refreshTrigger, onAppointmentUpdated }: DashboardProps) => {
   // Estados
   const [isLoading, setIsLoading] = useState(true);
-  const [appointments, setAppointments] = useState<Appointment[]>([]);
+  const [appointments, setAppointments] = useState<ExtendedAppointment[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
-  const [lastUpdated, setLastUpdated] = useState<Date>(new Date());
+  const [lastUpdated, setLastUpdated] = useState(new Date());
   
   // Carrega os agendamentos
   const loadAppointments = useCallback(async () => {
     try {
       setIsLoading(true);
-      const data = getAppointments();
+      
+      // Obtém os agendamentos da API
+      const data = await getAppointments();
       
       // Filtra agendamentos válidos
-      const validAppointments = data.filter(apt => {
+      const validAppointments = (Array.isArray(data) ? data : []).map(apt => ({
+        ...apt,
+        // Map any legacy status values to the current format
+        status: apt.status === "pendente" ? "pending" : apt.status,
+        // Ensure we use the correct property names from the Appointment type
+        clientName: apt.clientName,
+        carModel: apt.serviceType || apt.carModel
+      })).filter(apt => {
         if (!apt.date || !apt.time) return false;
         
         try {
@@ -178,7 +194,15 @@ const Dashboard = ({ refreshTrigger, onAppointmentUpdated }: DashboardProps) => 
         }
       });
       
-      setAppointments(validAppointments);
+      // Validate and ensure status is one of the allowed values
+      const validatedAppointments = validAppointments.map(appointment => ({
+        ...appointment,
+        status: (["pendente", "confirmado", "finalizado"].includes(appointment.status) 
+          ? appointment.status 
+          : "pendente") as "pendente" | "confirmado" | "finalizado"
+      }));
+      
+      setAppointments(validatedAppointments);
       setLastUpdated(new Date());
       
       if (onAppointmentUpdated) {
@@ -194,30 +218,52 @@ const Dashboard = ({ refreshTrigger, onAppointmentUpdated }: DashboardProps) => 
   
   // Filtra os agendamentos com base na busca
   const filteredAppointments = useMemo(() => {
-    if (!searchQuery.trim()) return appointments;
-    
-    const query = searchQuery.toLowerCase().trim();
-    return appointments.filter(apt => {
-      return (
-        apt.clientName?.toLowerCase().includes(query) ||
-        apt.phone?.includes(query) ||
-        apt.carModel?.toLowerCase().includes(query) ||
-        apt.plate?.toLowerCase().includes(query) ||
-        apt.status?.toLowerCase().includes(query) ||
-        (apt.date && new Date(apt.date).toLocaleDateString('pt-BR').toLowerCase().includes(query))
-      );
-    });
+    try {
+      if (!searchQuery.trim()) return appointments;
+      
+      const query = searchQuery.toLowerCase().trim();
+      return appointments.filter(apt => {
+        // Check all possible fields that might contain the search query
+        return [
+          apt.clientName,  // Using clientName instead of name
+          apt.phone,
+          apt.carModel,   // Using carModel instead of service
+          apt.plate,
+          apt.status,
+          apt.date ? new Date(apt.date).toLocaleDateString('pt-BR') : ''
+        ].some(field => 
+          field ? field.toString().toLowerCase().includes(query) : false
+        );
+      });
+    } catch (error) {
+      console.error("Erro ao filtrar agendamentos:", error);
+      return appointments; // Return all appointments if there's an error
+    }
   }, [appointments, searchQuery]);
   
   // Conta agendamentos pendentes
   const pendingCount = useMemo(() => {
-    return appointments.filter(apt => apt.status === "pendente").length;
+    try {
+      return appointments.filter(apt => apt.status === "pendente").length;
+    } catch (error) {
+      console.error("Erro ao contar agendamentos pendentes:", error);
+      return 0;
+    }
   }, [appointments]);
   
   // Carrega os agendamentos quando o componente monta ou quando refreshTrigger muda
   useEffect(() => {
-    loadAppointments();
-  }, [loadAppointments, refreshTrigger]);
+    const loadData = async () => {
+      try {
+        await loadAppointments();
+      } catch (error) {
+        console.error("Erro ao carregar agendamentos no useEffect:", error);
+        toast.error("Erro ao carregar os agendamentos");
+      }
+    };
+    
+    loadData();
+  }, [refreshTrigger]); // Removed loadAppointments from dependencies to prevent infinite loops
   
   // Atualiza a cada minuto para manter os dados atualizados
   useEffect(() => {

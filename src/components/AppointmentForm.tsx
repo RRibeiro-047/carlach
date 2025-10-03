@@ -16,18 +16,14 @@ interface AppointmentFormProps {
 }
 
 export const AppointmentForm = ({ onAppointmentCreated }: AppointmentFormProps) => {
-  // Horários disponíveis para agendamento
-  const availableTimes = [
+  // Horários base para agendamento
+  const baseAvailableTimes = [
     '08:00', '09:00', '10:00', '11:00', // Manhã
     '13:00', '14:00', '15:00', '16:00', '17:00'  // Tarde (após almoço)
   ];
 
-  // Verifica se um horário está disponível
-  const isTimeAvailable = (time: string) => {
-    if (!formData.date) return true; // Se não há data selecionada, mostra todos os horários
-    return isTimeSlotAvailable(formData.date, time);
-  };
-
+  // Estado para controlar os horários disponíveis
+  const [availableTimes, setAvailableTimes] = useState<string[]>(baseAvailableTimes);
   const [carSize, setCarSize] = useState<"" | "seda" | "suv" | "caminhonete">("");
   const [formData, setFormData] = useState({
     clientName: "",
@@ -43,6 +39,33 @@ export const AppointmentForm = ({ onAppointmentCreated }: AppointmentFormProps) 
   });
 
   const [errors, setErrors] = useState<Record<string, string>>({});
+
+  // Verifica se um horário está disponível
+  const isTimeAvailable = (time: string) => {
+    if (!formData.date) return true; // Se não há data selecionada, mostra todos os horários
+    return availableTimes.includes(time);
+  };
+
+  // Atualiza os horários disponíveis quando a data muda
+  useEffect(() => {
+    const updateAvailableTimes = async () => {
+      if (!formData.date) {
+        setAvailableTimes(baseAvailableTimes);
+        return;
+      }
+      
+      const updatedTimes = [];
+      for (const time of baseAvailableTimes) {
+        const isAvailable = await isTimeSlotAvailable(formData.date, time);
+        if (isAvailable) {
+          updatedTimes.push(time);
+        }
+      }
+      setAvailableTimes(updatedTimes);
+    };
+
+    updateAvailableTimes();
+  }, [formData.date, baseAvailableTimes, isTimeSlotAvailable]);
 
   // Função para verificar se uma data é dia útil (segunda a sábado)
   const isWeekday = (date: Date) => {
@@ -134,7 +157,7 @@ export const AppointmentForm = ({ onAppointmentCreated }: AppointmentFormProps) 
     return Object.keys(newErrors).length === 0;
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
     if (!validateForm(true)) {
@@ -143,48 +166,53 @@ export const AppointmentForm = ({ onAppointmentCreated }: AppointmentFormProps) 
     }
     
     // Validação adicional para garantir que o preço total está correto
+    let finalTotalPrice = formData.totalPrice;
     if (formData.serviceType && carSize) {
       const servicePrice = SERVICE_OPTIONS[formData.serviceType]?.price || 0;
       const waxPrice = formData.hasWax ? WAX_PRICES[carSize as keyof typeof WAX_PRICES] : 0;
-      const expectedTotal = servicePrice + waxPrice;
-      
-      if (formData.totalPrice !== expectedTotal) {
-        setFormData(prev => ({
-          ...prev,
-          totalPrice: expectedTotal
-        }));
-      }
+      finalTotalPrice = servicePrice + waxPrice;
     }
 
-    const appointment: Appointment = {
-      id: crypto.randomUUID(),
-      ...formData,
-      status: "pendente",
-      createdAt: new Date().toISOString(),
-    };
+    try {
+      const appointment: Omit<Appointment, 'id' | 'createdAt' | 'status'> = {
+        clientName: formData.clientName,
+        phone: formData.phone,
+        carModel: formData.carModel,
+        plate: formData.plate,
+        serviceType: formData.serviceType,
+        date: formData.date,
+        time: formData.time,
+        observations: formData.observations,
+        hasWax: formData.hasWax,
+        totalPrice: finalTotalPrice
+      };
 
-    saveAppointment(appointment);
-    
-    toast.success("Agendamento criado com sucesso!", {
-      description: `${formData.clientName} - ${formData.date} às ${formData.time}`,
-    });
+      await saveAppointment(appointment);
+      
+      toast.success("Agendamento criado com sucesso!", {
+        description: `${formData.clientName} - ${formData.date} às ${formData.time}`,
+      });
 
-    // Reset form
-    setCarSize("");
-    setFormData({
-      clientName: "",
-      phone: "",
-      carModel: "",
-      plate: "",
-      serviceType: "" as ServiceType,
-      date: "",
-      time: "",
-      observations: "",
-      hasWax: false,
-      totalPrice: 0
-    });
+      // Reset form
+      setCarSize("");
+      setFormData({
+        clientName: "",
+        phone: "",
+        carModel: "",
+        plate: "",
+        serviceType: "" as ServiceType,
+        date: "",
+        time: "",
+        observations: "",
+        hasWax: false,
+        totalPrice: 0
+      });
 
-    onAppointmentCreated();
+      onAppointmentCreated();
+    } catch (error) {
+      console.error('Erro ao salvar agendamento:', error);
+      toast.error("Erro ao criar agendamento. Por favor, tente novamente.");
+    }
   };
 
   // Filtra os serviços com base no tamanho do carro selecionado e calcula o preço total
